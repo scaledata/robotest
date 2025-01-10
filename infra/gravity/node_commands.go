@@ -251,10 +251,11 @@ var installCmdTemplate = template.Must(
 		--cloud-provider=generic --state-dir={{.StateDir}} \
 		--httpprofile=localhost:6061 \
 		{{if .Cluster}}--cluster={{.Cluster}}{{end}} \
-		{{if .OpsAdvertiseAddr}}--ops-advertise-addr={{.OpsAdvertiseAddr}}{{end}}\
 		{{if .ServiceUID}}--service-uid={{.ServiceUID}}{{end}}\
 		{{if .ServiceGID}}--service-gid={{.ServiceGID}}{{end}}\
 `))
+
+// Removed the above: {{if .OpsAdvertiseAddr}}--ops-advertise-addr={{.OpsAdvertiseAddr}}{{end}}\
 
 // Status queries cluster status
 func (g *gravity) Status(ctx context.Context) (*GravityStatus, error) {

@@ -40,7 +40,7 @@ import (
 	"github.com/aws/aws-sdk-go/aws/credentials"
 	"github.com/aws/aws-sdk-go/aws/session"
 	"github.com/aws/aws-sdk-go/service/ec2"
-	"github.com/dustin/go-humanize"
+	humanize "github.com/dustin/go-humanize"
 	"github.com/gravitational/trace"
 	uuid "github.com/satori/go.uuid"
 	"github.com/sirupsen/logrus"
@@ -55,7 +55,12 @@ type cloudDynamicParams struct {
 	env       map[string]string
 }
 
-func configureVMs(baseCtx context.Context, log logrus.FieldLogger, params cloudDynamicParams, nodes []*gravity) error {
+func configureVMs(
+	baseCtx context.Context,
+	log logrus.FieldLogger,
+	params cloudDynamicParams,
+	nodes []*gravity,
+) error {
 	errChan := make(chan error, len(nodes))
 
 	ctx, cancel := context.WithCancel(baseCtx)
@@ -77,7 +82,10 @@ func configureVMs(baseCtx context.Context, log logrus.FieldLogger, params cloudD
 }
 
 // Provision will attempt to provision the requested cluster
-func (c *TestContext) Provision(cfg ProvisionerConfig) (cluster Cluster, err error) {
+func (c *TestContext) Provision(cfg ProvisionerConfig) (
+	cluster Cluster,
+	err error,
+) {
 	// store the configuration used for provisioning
 	c.provisionerCfg = cfg
 
@@ -90,6 +98,11 @@ func (c *TestContext) Provision(cfg ProvisionerConfig) (cluster Cluster, err err
 		}
 	case constants.Ops:
 		cluster, err = c.provisionOps(cfg)
+	case constants.Vsphere:
+		cluster, _, err = c.provisionCloud(cfg)
+		if err != nil {
+			return Cluster{}, err
+		}
 	default:
 		err = trace.BadParameter("unkown cloud provider: %q", cfg.CloudProvider)
 	}
@@ -109,20 +122,36 @@ func (c *TestContext) Provision(cfg ProvisionerConfig) (cluster Cluster, err err
 }
 
 // provisionOps utilizes an ops center installation flow to complete cluster installation
-func (c *TestContext) provisionOps(cfg ProvisionerConfig) (cluster Cluster, err error) {
+func (c *TestContext) provisionOps(cfg ProvisionerConfig) (
+	cluster Cluster,
+	err error,
+) {
 	c.Logger().WithField("config", cfg).Debug("Provisioning via Ops Center")
 
 	// verify connection before starting provisioning
 	c.Logger().Debug("attempting to connect to AWS api")
-	sess, err := session.NewSession(&aws.Config{
-		Region:      aws.String(cfg.Ops.EC2Region),
-		Credentials: credentials.NewStaticCredentials(cfg.Ops.EC2AccessKey, cfg.Ops.EC2SecretKey, ""),
-	})
+	sess, err := session.NewSession(
+		&aws.Config{
+			Region: aws.String(cfg.Ops.EC2Region),
+			Credentials: credentials.NewStaticCredentials(
+				cfg.Ops.EC2AccessKey,
+				cfg.Ops.EC2SecretKey,
+				"",
+			),
+		},
+	)
 	if err != nil {
 		return cluster, trace.Wrap(err)
 	}
 	c.Logger().Debug("logging into the ops center")
-	out, err := exec.Command("tele", "login", "-o", cfg.Ops.URL, "--key", cfg.Ops.OpsKey).CombinedOutput()
+	out, err := exec.Command(
+		"tele",
+		"login",
+		"-o",
+		cfg.Ops.URL,
+		"--key",
+		cfg.Ops.OpsKey,
+	).CombinedOutput()
 	if err != nil {
 		return cluster, trace.WrapWithMessage(err, string(out))
 	}
@@ -189,7 +218,10 @@ Loop:
 				// the cluster install completed, we can continue the install process
 				break Loop
 			default:
-				return cluster, trace.BadParameter("unexpected cluster status: %v", status)
+				return cluster, trace.BadParameter(
+					"unexpected cluster status: %v",
+					status,
+				)
 			}
 		}
 	}
@@ -197,7 +229,11 @@ Loop:
 	// now that the requested cluster has been created, we have to build the []Gravity slice of nodes
 	c.Logger().Debug("Attempting to get a listing of instances from AWS for the cluster.")
 	ec2svc := ec2.New(sess)
-	gravityNodes, err := c.getAWSNodes(ec2svc, "tag:KubernetesCluster", clusterName)
+	gravityNodes, err := c.getAWSNodes(
+		ec2svc,
+		"tag:KubernetesCluster",
+		clusterName,
+	)
 	if err != nil {
 		return cluster, trace.Wrap(err)
 	}
@@ -208,7 +244,12 @@ Loop:
 		return cluster, trace.Wrap(err)
 	}
 
-	err = validateDiskSpeed(c.Context(), gravityNodes, cfg.dockerDevice, c.Logger())
+	err = validateDiskSpeed(
+		c.Context(),
+		gravityNodes,
+		cfg.dockerDevice,
+		c.Logger(),
+	)
 	if err != nil {
 		return cluster, trace.Wrap(err)
 	}
@@ -219,8 +260,12 @@ Loop:
 }
 
 // provisionCloud gets VMs up, running and ready to use
-func (c *TestContext) provisionCloud(cfg ProvisionerConfig) (cluster Cluster, config *terraform.Config, err error) {
-	log := c.Logger().WithField("config", cfg)
+func (c *TestContext) provisionCloud(cfg ProvisionerConfig) (
+	cluster Cluster,
+	config *terraform.Config,
+	err error,
+) {
+	log := c.Logger().WithField("vsphere-config", cfg.Vsphere)
 	log.Debug("Provisioning VMs.")
 
 	err = validateConfig(cfg)
@@ -248,16 +293,22 @@ func (c *TestContext) provisionCloud(cfg ProvisionerConfig) (cluster Cluster, co
 	gravityNodes, err := connectVMs(ctx, c.Logger(), infra.params, infra.nodes)
 	if err != nil {
 		log.WithError(err).Error("Some nodes failed to connect, tear down as unusable.")
-		return cluster, nil, trace.NewAggregate(err, destroyResource(infra.destroyFn))
+		return cluster, nil, trace.NewAggregate(
+			err,
+			destroyResource(infra.destroyFn),
+		)
 	}
-	// Start streaming logs as soon as connected
-	c.streamLogs(gravityNodes)
+	//// Start streaming logs as soon as connected
+	//c.streamLogs(gravityNodes)
 
 	log.Debug("Configuring VMs.")
 	err = configureVMs(ctx, c.Logger(), infra.params, gravityNodes)
 	if err != nil {
 		log.WithError(err).Error("Some nodes failed to initialize, tear down as non-usable.")
-		return cluster, nil, trace.NewAggregate(err, destroyResource(infra.destroyFn))
+		return cluster, nil, trace.NewAggregate(
+			err,
+			destroyResource(infra.destroyFn),
+		)
 	}
 
 	err = c.postProvision(gravityNodes)
@@ -267,7 +318,12 @@ func (c *TestContext) provisionCloud(cfg ProvisionerConfig) (cluster Cluster, co
 	}
 
 	if cfg.CloudProvider == constants.Azure {
-		err = validateDiskSpeed(c.Context(), gravityNodes, cfg.dockerDevice, c.Logger())
+		err = validateDiskSpeed(
+			c.Context(),
+			gravityNodes,
+			cfg.dockerDevice,
+			c.Logger(),
+		)
 		if err != nil {
 			return cluster, nil, trace.Wrap(err)
 		}
@@ -282,33 +338,33 @@ func (c *TestContext) provisionCloud(cfg ProvisionerConfig) (cluster Cluster, co
 	return cluster, &infra.params.terraform, nil
 }
 
-func (c *TestContext) streamLogs(gravityNodes []*gravity) {
-	c.Logger().Debug("Streaming logs.")
-	for _, node := range gravityNodes {
-		go func(node *gravity) {
-			err := node.streamStartupLogs(c.monitorCtx)
-			if err != nil && !utils.IsContextCancelledError(err) {
-				c.Logger().Warnf("Failed to stream startup script logs: %v.", err)
-			}
-		}(node)
-		go func(node *gravity) {
-			if err := node.streamLogs(c.monitorCtx); err != nil {
-				switch {
-				case sshutil.IsExitMissingError(err):
-					if c.Context().Err() != nil {
-						// This test has already been cancelled / has timed out
-						return
-					}
-					c.markPreempted(node)
-				case utils.IsContextCancelledError(err):
-					// Ignore
-				default:
-					c.Logger().Warnf("Failed to stream logs: %v.", err)
-				}
-			}
-		}(node)
-	}
-}
+//func (c *TestContext) streamLogs(gravityNodes []*gravity) {
+//	c.Logger().Debug("Streaming logs.")
+//	for _, node := range gravityNodes {
+//		go func(node *gravity) {
+//			err := node.streamStartupLogs(c.monitorCtx)
+//			if err != nil && !utils.IsContextCancelledError(err) {
+//				c.Logger().Warnf("Failed to stream startup script logs: %v.", err)
+//			}
+//		}(node)
+//		go func(node *gravity) {
+//			if err := node.streamLogs(c.monitorCtx); err != nil {
+//				switch {
+//				case sshutil.IsExitMissingError(err):
+//					if c.Context().Err() != nil {
+//						// This test has already been cancelled / has timed out
+//						return
+//					}
+//					c.markPreempted(node)
+//				case utils.IsContextCancelledError(err):
+//					// Ignore
+//				default:
+//					c.Logger().Warnf("Failed to stream logs: %v.", err)
+//				}
+//			}
+//		}(node)
+//	}
+//}
 
 // postProvision runs common tasks for both ops and cloud provisioners once the VMs have been setup and are running
 func (c *TestContext) postProvision(gravityNodes []*gravity) error {
@@ -318,7 +374,10 @@ func (c *TestContext) postProvision(gravityNodes []*gravity) error {
 	c.Logger().Debug("synchronizing clocks")
 	var timeNodes []sshutil.SshNode
 	for _, node := range gravityNodes {
-		timeNodes = append(timeNodes, sshutil.SshNode{Client: node.Client(), Log: node.Logger()})
+		timeNodes = append(
+			timeNodes,
+			sshutil.SshNode{Client: node.Client(), Log: node.Logger()},
+		)
 	}
 	if err := sshutil.WaitTimeSync(ctx, timeNodes); err != nil {
 		return trace.Wrap(err)
@@ -336,14 +395,26 @@ const (
 )
 
 // bootstrapAzure workarounds some issues with Azure platform init
-func bootstrapAzure(ctx context.Context, g *gravity, param cloudDynamicParams) (err error) {
-	err = sshutil.WaitForFile(ctx, g.Client(), g.Logger(),
-		waagentProvisionFile, sshutil.TestRegularFile)
+func bootstrapAzure(
+	ctx context.Context,
+	g *gravity,
+	param cloudDynamicParams,
+) (err error) {
+	err = sshutil.WaitForFile(
+		ctx, g.Client(), g.Logger(),
+		waagentProvisionFile, sshutil.TestRegularFile,
+	)
 	if err != nil {
 		return trace.Wrap(err)
 	}
 
-	err = sshutil.TestFile(ctx, g.Client(), g.Logger(), cloudInitCompleteFile, sshutil.TestRegularFile)
+	err = sshutil.TestFile(
+		ctx,
+		g.Client(),
+		g.Logger(),
+		cloudInitCompleteFile,
+		sshutil.TestRegularFile,
+	)
 	if err == nil {
 		g.Logger().Debug("node already bootstrapped")
 		return nil
@@ -352,56 +423,99 @@ func bootstrapAzure(ctx context.Context, g *gravity, param cloudDynamicParams) (
 		return trace.Wrap(err)
 	}
 
-	err = sshutil.TestFile(ctx, g.Client(), g.Logger(), cloudInitSupportedFile, sshutil.TestRegularFile)
+	err = sshutil.TestFile(
+		ctx,
+		g.Client(),
+		g.Logger(),
+		cloudInitSupportedFile,
+		sshutil.TestRegularFile,
+	)
 	if err == nil {
 		g.Logger().Debug("cloud-init underway")
-		return sshutil.WaitForFile(ctx, g.Client(), g.Logger(), cloudInitCompleteFile, sshutil.TestRegularFile)
+		return sshutil.WaitForFile(
+			ctx,
+			g.Client(),
+			g.Logger(),
+			cloudInitCompleteFile,
+			sshutil.TestRegularFile,
+		)
 	}
 	if !trace.IsNotFound(err) {
 		return trace.Wrap(err)
 	}
 
 	// apparently cloud-init scripts are not supported for given OS
-	err = sshutil.RunScript(ctx, g.Client(), g.Logger(),
-		filepath.Join(param.ScriptPath, "bootstrap", fmt.Sprintf("%s.sh", param.os.Vendor)),
-		sshutil.SUDO)
+	err = sshutil.RunScript(
+		ctx, g.Client(), g.Logger(),
+		filepath.Join(
+			param.ScriptPath,
+			"bootstrap",
+			fmt.Sprintf("%s.sh", param.os.Vendor),
+		),
+		sshutil.SUDO,
+	)
 	return trace.Wrap(err)
 }
 
 // bootstrapCloud is a simple workflow to wait for cloud-init to complete
-func bootstrapCloud(ctx context.Context, g *gravity, param cloudDynamicParams) (err error) {
+func bootstrapCloud(
+	ctx context.Context,
+	g *gravity,
+	param cloudDynamicParams,
+) (err error) {
 	return trace.Wrap(g.waitForBootstrapScript(ctx))
 }
 
 func (g *gravity) waitForBootstrapScript(ctx context.Context) error {
-	cmd := fmt.Sprintf(`sudo bash -c "[[ -f %v ]] && exit 2 || [[ -f %v ]] && exit 0 || exit 1"`,
-		cloudInitFailedFile, cloudInitCompleteFile)
-	err := wait.Retry(ctx, func() error {
-		err := sshutil.RunAndParse(ctx, g.Client(), g.Logger(), cmd, nil, sshutil.ParseDiscard)
-		if err == nil {
-			return nil
-		}
-		if exitError, ok := trace.Unwrap(err).(sshutil.ExitStatusError); ok {
-			/*
-			   0      bootstrap successful file found
-			   2      bootstrap failed file found
-			   1      no bootstrap file found
-			*/
-			switch exitError.ExitStatus() {
-			case 0:
+	cmd := fmt.Sprintf(
+		`sudo bash -c "[[ -f %v ]] && exit 2 || [[ -f %v ]] && exit 0 || exit 1"`,
+		cloudInitFailedFile, cloudInitCompleteFile,
+	)
+	err := wait.Retry(
+		ctx, func() error {
+			err := sshutil.RunAndParse(
+				ctx,
+				g.Client(),
+				g.Logger(),
+				cmd,
+				nil,
+				sshutil.ParseDiscard,
+			)
+			if err == nil {
 				return nil
-			case 2:
-				return wait.Abort(trace.Errorf("bootstrap script failed"))
-			case 1:
-				return wait.Continue("bootstrap status file not found")
 			}
-		}
-		return wait.Abort(trace.Wrap(err, "waiting for bootstrap script to complete"))
-	})
+			if exitError, ok := trace.Unwrap(err).(sshutil.ExitStatusError); ok {
+				/*
+				   0      bootstrap successful file found
+				   2      bootstrap failed file found
+				   1      no bootstrap file found
+				*/
+				switch exitError.ExitStatus() {
+				case 0:
+					return nil
+				case 2:
+					return wait.Abort(trace.Errorf("bootstrap script failed"))
+				case 1:
+					return wait.Continue("bootstrap status file not found")
+				}
+			}
+			return wait.Abort(
+				trace.Wrap(
+					err,
+					"waiting for bootstrap script to complete",
+				),
+			)
+		},
+	)
 	return trace.Wrap(err)
 }
 
-func connectVMs(ctx context.Context, log logrus.FieldLogger, params cloudDynamicParams, nodes []infra.Node) (out []*gravity, err error) {
+func connectVMs(
+	ctx context.Context,
+	log logrus.FieldLogger,
+	params cloudDynamicParams,
+	nodes []infra.Node,
+) (out []*gravity, err error) {
 	errC := make(chan error, len(nodes))
 	nodeC := make(chan interface{}, len(nodes))
 
@@ -425,22 +539,31 @@ func connectVMs(ctx context.Context, log logrus.FieldLogger, params cloudDynamic
 		out = append(out, node.(*gravity))
 	}
 
-	sort.Slice(out, func(i, j int) bool {
-		return out[i].Node().PrivateAddr() < out[j].Node().PrivateAddr()
-	})
+	sort.Slice(
+		out, func(i, j int) bool {
+			return out[i].Node().PrivateAddr() < out[j].Node().PrivateAddr()
+		},
+	)
 
 	return out, nil
 }
 
-func connectVM(ctx context.Context, log logrus.FieldLogger, node infra.Node, param cloudDynamicParams) (*gravity, error) {
+func connectVM(
+	ctx context.Context,
+	log logrus.FieldLogger,
+	node infra.Node,
+	param cloudDynamicParams,
+) (*gravity, error) {
 	g := &gravity{
 		node:  node,
 		param: param,
 		ts:    time.Now(),
-		log: log.WithFields(logrus.Fields{
-			"ip":        node.PrivateAddr(),
-			"public_ip": node.Addr(),
-		}),
+		log: log.WithFields(
+			logrus.Fields{
+				"ip":        node.PrivateAddr(),
+				"public_ip": node.Addr(),
+			},
+		),
 	}
 
 	client, err := sshClient(ctx, g.node, g.log)
@@ -457,7 +580,12 @@ func connectVM(ctx context.Context, log logrus.FieldLogger, node infra.Node, par
 // 2. (TODO) run bootstrap scripts - as Azure doesn't support them for RHEL/CentOS, will migrate here
 // 2.  - i.e. run bootstrap commands, load installer, etc.
 // TODO: migrate bootstrap scripts here as well;
-func configureVM(ctx context.Context, log logrus.FieldLogger, node *gravity, param cloudDynamicParams) (err error) {
+func configureVM(
+	ctx context.Context,
+	log logrus.FieldLogger,
+	node *gravity,
+	param cloudDynamicParams,
+) (err error) {
 	switch param.CloudProvider {
 	case constants.AWS:
 		err = bootstrapCloud(ctx, node, param)
@@ -465,10 +593,13 @@ func configureVM(ctx context.Context, log logrus.FieldLogger, node *gravity, par
 		err = bootstrapAzure(ctx, node, param)
 	case constants.GCE:
 		err = bootstrapCloud(ctx, node, param)
-	case constants.Ops:
-		// For ops installs the installer is not needed
+	case constants.Ops, constants.Vsphere:
+		// For ops and vsphere installs the installer is not needed
 	default:
-		return trace.BadParameter("unsupported cloud provider %s", param.CloudProvider)
+		return trace.BadParameter(
+			"unsupported cloud provider %s",
+			param.CloudProvider,
+		)
 	}
 	if err != nil {
 		return trace.Wrap(err)
@@ -477,13 +608,21 @@ func configureVM(ctx context.Context, log logrus.FieldLogger, node *gravity, par
 	return nil
 }
 
-func validateDiskSpeed(ctx context.Context, nodes []*gravity, device string, logger logrus.FieldLogger) error {
+func validateDiskSpeed(
+	ctx context.Context,
+	nodes []*gravity,
+	device string,
+	logger logrus.FieldLogger,
+) error {
 	logger.Debug("Ensuring disk speed is adequate across nodes.")
 	ctx, cancel := context.WithTimeout(ctx, diskWaitTimeout)
 	defer cancel()
 	err := waitDisks(ctx, nodes, []string{"/iotest", device}, logger)
 	if err != nil {
-		err = trace.Wrap(err, "VM disks did not meet performance requirements, tear down as non-usable")
+		err = trace.Wrap(
+			err,
+			"VM disks did not meet performance requirements, tear down as non-usable",
+		)
 		logger.WithError(err).Error("VM disks did not meet performance requirements, tear down as non-usable.")
 		return trace.Wrap(err)
 	}
@@ -492,7 +631,12 @@ func validateDiskSpeed(ctx context.Context, nodes []*gravity, device string, log
 
 // waitDisks is a necessary workaround for Azure VMs to wait until their disk initialization processes are complete
 // otherwise it'll fail telekube pre-install checks
-func waitDisks(ctx context.Context, nodes []*gravity, paths []string, logger logrus.FieldLogger) error {
+func waitDisks(
+	ctx context.Context,
+	nodes []*gravity,
+	paths []string,
+	logger logrus.FieldLogger,
+) error {
 	errs := make(chan error, len(nodes))
 
 	for _, node := range nodes {
@@ -505,36 +649,53 @@ func waitDisks(ctx context.Context, nodes []*gravity, paths []string, logger log
 }
 
 // waitDisk will wait specific disk performance to report OK
-func waitDisk(ctx context.Context, node *gravity, paths []string, minSpeed uint64, logger logrus.FieldLogger) error {
-	err := wait.Retry(ctx, func() error {
-		for _, path := range paths {
-			if !strings.HasPrefix(path, "/dev") {
-				defer func() {
-					errRemove := sshutil.Run(ctx, node.Client(), node.Logger(),
-						fmt.Sprintf("sudo /bin/rm -f %s", path), nil)
-					if errRemove != nil {
-						logger.Warnf("Failed to remove path: %v.", errRemove)
-					}
-				}()
+func waitDisk(
+	ctx context.Context,
+	node *gravity,
+	paths []string,
+	minSpeed uint64,
+	logger logrus.FieldLogger,
+) error {
+	err := wait.Retry(
+		ctx, func() error {
+			for _, path := range paths {
+				if !strings.HasPrefix(path, "/dev") {
+					defer func() {
+						errRemove := sshutil.Run(
+							ctx, node.Client(), node.Logger(),
+							fmt.Sprintf("sudo /bin/rm -f %s", path), nil,
+						)
+						if errRemove != nil {
+							logger.Warnf("Failed to remove path: %v.", errRemove)
+						}
+					}()
+				}
+				var out string
+				err := sshutil.RunAndParse(
+					ctx, node.Client(), node.Logger(),
+					fmt.Sprintf(
+						"sudo dd if=/dev/zero of=%s bs=100K count=1024 conv=fdatasync 2>&1",
+						path,
+					),
+					nil, sshutil.ParseAsString(&out),
+				)
+				if err != nil {
+					return wait.Abort(trace.Wrap(err))
+				}
+				speed, err := ParseDDOutput(out)
+				if err != nil {
+					return wait.Abort(trace.Wrap(err))
+				}
+				if speed < minSpeed {
+					return wait.Continue(
+						"%s has %v/s < minimum of %v/s",
+						path, humanize.Bytes(speed), humanize.Bytes(minSpeed),
+					)
+				}
 			}
-			var out string
-			err := sshutil.RunAndParse(ctx, node.Client(), node.Logger(),
-				fmt.Sprintf("sudo dd if=/dev/zero of=%s bs=100K count=1024 conv=fdatasync 2>&1", path),
-				nil, sshutil.ParseAsString(&out))
-			if err != nil {
-				return wait.Abort(trace.Wrap(err))
-			}
-			speed, err := ParseDDOutput(out)
-			if err != nil {
-				return wait.Abort(trace.Wrap(err))
-			}
-			if speed < minSpeed {
-				return wait.Continue("%s has %v/s < minimum of %v/s",
-					path, humanize.Bytes(speed), humanize.Bytes(minSpeed))
-			}
-		}
-		return nil
-	})
+			return nil
+		},
+	)
 	return trace.Wrap(err)
 }
 

@@ -202,6 +202,12 @@ func makeDynamicParams(baseConfig ProvisionerConfig) (*cloudDynamicParams, error
 			"redhat": "redhat",
 			"centos": "centos",
 		},
+		constants.Vsphere: {
+			"ubuntu": "ubuntu",
+			"debian": "admin",
+			"redhat": "polaris",
+			"centos": "centos",
+		},
 		constants.Ops: {
 			"centos": "centos",
 		},
@@ -254,6 +260,10 @@ func makeDynamicParams(baseConfig ProvisionerConfig) (*cloudDynamicParams, error
 		param.terraform.GCE.Region = baseConfig.cloudRegions.Next()
 		param.terraform.GCE.NodeTag = gce.TranslateClusterName(baseConfig.tag)
 		param.terraform.VarFilePath = baseConfig.GCE.VarFilePath
+	case baseConfig.Vsphere != nil:
+		config := *baseConfig.Vsphere
+		param.terraform.Vsphere = &config
+		param.terraform.Vsphere.SSHUser = param.user
 	}
 
 	return &param, nil

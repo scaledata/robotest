@@ -11,7 +11,7 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-FROM quay.io/gravitational/debian-grande:stretch
+FROM quay.io/gravitational/debian-grande:buster
 
 ARG TERRAFORM_VERSION
 ARG CHROMEDRIVER_VERSION
@@ -59,6 +59,10 @@ RUN mkdir -p /robotest
 WORKDIR /robotest
 COPY entrypoint.sh /entrypoint.sh
 COPY build/robotest-e2e /usr/bin/robotest-e2e
+COPY polaris.pub /robotest/polaris.pub
+COPY polaris.pem /robotest/polaris.pem
+RUN chmod 0644 /robotest/polaris.pem
+#TODO: Change the user on the template and the SSH keys. polaris is not meant for this
 
 RUN chmod +x /usr/bin/robotest-e2e && \
     chmod +x /entrypoint.sh

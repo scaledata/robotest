@@ -87,7 +87,21 @@ func (c *TestContext) OfflineInstall(nodes []Gravity, param InstallParam) error 
 	defer cancel()
 
 	param.CloudProvider = c.provisionerCfg.CloudProvider
-	master := nodes[0].(*gravity)
+
+	// Before the typecast, log the details of `nodes`
+	c.Logger().Infof("Nodes slice: %v", nodes)
+	for i, node := range nodes {
+		c.Logger().Infof("Node[%d]: type=%T, value=%v", i, node, node)
+	}
+
+	// Attempt the typecast
+	master, ok := nodes[0].(*gravity)
+	if !ok {
+		c.Logger().Fatalf("Failed to typecast nodes[0] to *gravity. Actual type: %T", nodes[0])
+	}
+
+	// If the typecast is successful, proceed with the rest of your code
+	c.Logger().Infof("Typecast successful. master: %v", master)
 	if param.Token == "" {
 		param.Token = "ROBOTEST"
 	}
