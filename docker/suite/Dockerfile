@@ -11,7 +11,7 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-FROM quay.io/gravitational/debian-grande:stretch
+FROM quay.io/gravitational/debian-grande:buster
 
 RUN apt-get update && \
     apt-get install -y curl unzip gnupg2 dirmngr
@@ -23,6 +23,7 @@ ARG TERRAFORM_PROVIDER_AWS_VERSION
 ARG TERRAFORM_PROVIDER_GOOGLE_VERSION
 ARG TERRAFORM_PROVIDER_TEMPLATE_VERSION
 ARG TERRAFORM_PROVIDER_RANDOM_VERSION
+ARG TERRAFORM_PROVIDER_VSPHERE_VERSION
 ENV TF_TARBALL https://releases.hashicorp.com/terraform/${TERRAFORM_VERSION}/terraform_${TERRAFORM_VERSION}_linux_amd64.zip
 
 ENV TF_PLUGINS \
@@ -33,7 +34,10 @@ ENV TF_PLUGINS \
     # Google Compute Engine
     https://releases.hashicorp.com/terraform-provider-google/${TERRAFORM_PROVIDER_GOOGLE_VERSION}/terraform-provider-google_${TERRAFORM_PROVIDER_GOOGLE_VERSION}_linux_amd64.zip \
     https://releases.hashicorp.com/terraform-provider-template/${TERRAFORM_PROVIDER_TEMPLATE_VERSION}/terraform-provider-template_${TERRAFORM_PROVIDER_TEMPLATE_VERSION}_linux_amd64.zip \
-    https://releases.hashicorp.com/terraform-provider-random/${TERRAFORM_PROVIDER_RANDOM_VERSION}/terraform-provider-random_${TERRAFORM_PROVIDER_RANDOM_VERSION}_linux_amd64.zip
+    https://releases.hashicorp.com/terraform-provider-random/${TERRAFORM_PROVIDER_RANDOM_VERSION}/terraform-provider-random_${TERRAFORM_PROVIDER_RANDOM_VERSION}_linux_amd64.zip \
+     # vSphere
+    https://releases.hashicorp.com/terraform-provider-vsphere/${TERRAFORM_PROVIDER_VSPHERE_VERSION}/terraform-provider-vsphere_1.14.0_linux_amd64.zip
+
 
 RUN curl ${TF_TARBALL} -o terraform.zip && \
     unzip terraform.zip -d /usr/bin && \
@@ -59,5 +63,9 @@ WORKDIR /robotest
 COPY build/robotest-suite /usr/bin/robotest-suite
 COPY terraform /robotest/terraform
 COPY run_suite.sh /usr/bin/run_suite.sh
+COPY polaris.pub /robotest/polaris.pub
+COPY polaris.pem /robotest/polaris.pem
+RUN chmod 0660 /robotest/polaris.pem
+#TODO: Change the user on the template and the SSH keys. polaris is not meant for this
 
 RUN chmod +x /usr/bin/robotest-suite

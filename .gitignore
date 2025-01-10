@@ -25,3 +25,4 @@ tf/
 # build artifacts
 version.go
 build/
+.idea

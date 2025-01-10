@@ -37,8 +37,8 @@ type Token struct {
 }
 
 const (
-	tokenURL      = "https://login.microsoftonline.com/%s/oauth2/token"
-	managementURL = "https://management.azure.com/subscriptions/%s/resourcegroups/%s?api-version=2016-09-01"
+	tokenURL      = "https://login.microsoftonline.us/%s/oauth2/token"
+	managementURL = "https://management.usgovcloudapi.net/subscriptions/%s/resourcegroups/%s?api-version=2016-09-01"
 )
 
 // GetAuthToken retrieves OAuth token for an application
