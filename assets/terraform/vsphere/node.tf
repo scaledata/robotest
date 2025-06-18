@@ -4,7 +4,7 @@
 
 resource "vsphere_virtual_machine" "node" {
 #TODO: Move to vars!!
-  guest_id    = "rhel7_64Guest"
+  guest_id    = "ubuntu64Guest"
   count       = var.nodes
   name        = "${var.node_tag}-node-${count.index}"
   folder      = var.vm_folder
@@ -21,7 +21,7 @@ resource "vsphere_virtual_machine" "node" {
   disk {
     label = "disk0"
     size  = 64
-    thin_provisioned = false  #TODO(ag): Update the template to true and change here
+    thin_provisioned = true  #TODO(ag): Update the template to true and change here
   }
 
   clone {

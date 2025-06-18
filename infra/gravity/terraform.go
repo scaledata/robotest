@@ -62,7 +62,12 @@ const finalTeardownTimeout = 20 * time.Minute
 
 // wrapDestroyFunc returns a function that wraps the specified set of nodes
 // and the given clean up function that implements report collection and resource clean up.
-func wrapDestroyFunc(c *TestContext, tag string, nodes []Gravity, destroy func(context.Context) error) DestroyFn {
+func wrapDestroyFunc(
+	c *TestContext,
+	tag string,
+	nodes []Gravity,
+	destroy func(context.Context) error,
+) DestroyFn {
 	return func() error {
 		defer func() {
 			if r := recover(); r != nil {
@@ -75,11 +80,13 @@ func wrapDestroyFunc(c *TestContext, tag string, nodes []Gravity, destroy func(c
 			}
 		}()
 
-		log := c.Logger().WithFields(logrus.Fields{
-			"nodes":              nodes,
-			"provisioner_policy": policy,
-			"test_status":        testStatus[c.Failed()],
-		})
+		log := c.Logger().WithFields(
+			logrus.Fields{
+				"nodes":              nodes,
+				"provisioner_policy": policy,
+				"test_status":        testStatus[c.Failed()],
+			},
+		)
 
 		skipLogCollection := false
 		ctx := c.Context()
@@ -157,7 +164,11 @@ func saveResourceAllocations() error {
 		return nil
 	}
 
-	file, err := os.OpenFile(policy.ResourceListFile, os.O_RDWR|os.O_CREATE, constants.SharedReadMask)
+	file, err := os.OpenFile(
+		policy.ResourceListFile,
+		os.O_RDWR|os.O_CREATE,
+		constants.SharedReadMask,
+	)
 	if err != nil {
 		return trace.ConvertSystemError(err)
 	}
@@ -174,7 +185,10 @@ func saveResourceAllocations() error {
 }
 
 // makeDynamicParams takes base config, validates it and returns cloudDynamicParams
-func makeDynamicParams(baseConfig ProvisionerConfig) (*cloudDynamicParams, error) {
+func makeDynamicParams(baseConfig ProvisionerConfig) (
+	*cloudDynamicParams,
+	error,
+) {
 	param := cloudDynamicParams{ProvisionerConfig: baseConfig}
 
 	// OS name is cloud-init script specific
@@ -203,7 +217,7 @@ func makeDynamicParams(baseConfig ProvisionerConfig) (*cloudDynamicParams, error
 			"centos": "centos",
 		},
 		constants.Vsphere: {
-			"ubuntu": "ubuntu",
+			"ubuntu": "polaris",
 			"debian": "admin",
 			"redhat": "polaris",
 			"centos": "centos",
@@ -215,7 +229,10 @@ func makeDynamicParams(baseConfig ProvisionerConfig) (*cloudDynamicParams, error
 
 	param.user, ok = usernames[baseConfig.CloudProvider][baseConfig.os.Vendor]
 	if !ok {
-		return nil, trace.BadParameter("unknown OS vendor: %q", baseConfig.os.Vendor)
+		return nil, trace.BadParameter(
+			"unknown OS vendor: %q",
+			baseConfig.os.Vendor,
+		)
 	}
 
 	param.homeDir = filepath.Join("/home", param.user)
@@ -269,7 +286,11 @@ func makeDynamicParams(baseConfig ProvisionerConfig) (*cloudDynamicParams, error
 	return &param, nil
 }
 
-func runTerraform(ctx context.Context, baseConfig ProvisionerConfig, logger logrus.FieldLogger) (resp *terraformResp, err error) {
+func runTerraform(
+	ctx context.Context,
+	baseConfig ProvisionerConfig,
+	logger logrus.FieldLogger,
+) (resp *terraformResp, err error) {
 	retryer := wait.Retryer{
 		Delay:       defaults.TerraformRetryDelay,
 		Attempts:    defaults.TerraformRetries,
@@ -278,29 +299,33 @@ func runTerraform(ctx context.Context, baseConfig ProvisionerConfig, logger logr
 
 	retry := 0
 	cfg := baseConfig
-	err = retryer.Do(ctx, func() error {
-		if retry != 0 {
-			cfg = baseConfig.WithTag(fmt.Sprintf("R%d", retry))
-			logger.WithFields(logrus.Fields{
-				"state-dir": cfg.StateDir,
-				"tag":       cfg.Tag(),
-			}).Info("Retrying terraform provisioning.")
-		}
-		retry++
+	err = retryer.Do(
+		ctx, func() error {
+			if retry != 0 {
+				cfg = baseConfig.WithTag(fmt.Sprintf("R%d", retry))
+				logger.WithFields(
+					logrus.Fields{
+						"state-dir": cfg.StateDir,
+						"tag":       cfg.Tag(),
+					},
+				).Info("Retrying terraform provisioning.")
+			}
+			retry++
 
-		params, err := makeDynamicParams(cfg)
-		if err != nil {
-			return wait.Abort(trace.Wrap(err))
-		}
+			params, err := makeDynamicParams(cfg)
+			if err != nil {
+				return wait.Abort(trace.Wrap(err))
+			}
 
-		resp, err = runTerraformOnce(ctx, cfg, *params, logger)
-		if err == nil {
-			return nil
-		}
+			resp, err = runTerraformOnce(ctx, cfg, *params, logger)
+			if err == nil {
+				return nil
+			}
 
-		logger.WithError(err).Warn("terraform provisioning failed")
-		return wait.Continue(err.Error())
-	})
+			logger.WithError(err).Warn("terraform provisioning failed")
+			return wait.Continue(err.Error())
+		},
+	)
 	return resp, trace.Wrap(err)
 }
 
@@ -317,20 +342,33 @@ func runTerraformOnce(
 	// only second chance is provided
 	//
 	// TODO: this seems to require more thorough testing, and same approach applied to Destroy
-	p, err := terraform.New(filepath.Join(baseConfig.StateDir, "tf"), params.terraform)
+	p, err := terraform.New(
+		filepath.Join(baseConfig.StateDir, "tf"),
+		params.terraform,
+	)
 	if err != nil {
 		return nil, trace.Wrap(err)
 	}
 
-	for _, threshold := range []time.Duration{time.Minute * 15, time.Minute * 10} {
+	for _, threshold := range []time.Duration{
+		time.Minute * 15,
+		time.Minute * 10,
+	} {
 		ctx, cancel := context.WithTimeout(baseContext, threshold)
 		defer cancel()
 
 		_, err = p.Create(ctx, false)
 		if ctx.Err() != nil {
-			teardownCtx, cancel := context.WithTimeout(context.Background(), finalTeardownTimeout)
+			teardownCtx, cancel := context.WithTimeout(
+				context.Background(),
+				finalTeardownTimeout,
+			)
 			defer cancel()
-			err1 := trace.Errorf("[terraform interrupted on apply due to upper context=%v, result=%v]", ctx.Err(), err)
+			err1 := trace.Errorf(
+				"[terraform interrupted on apply due to upper context=%v, result=%v]",
+				ctx.Err(),
+				err,
+			)
 			err2 := trace.Wrap(p.Destroy(teardownCtx))
 			return nil, trace.NewAggregate(err1, err2)
 		}

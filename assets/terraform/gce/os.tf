@@ -2,7 +2,7 @@
 # OS configuration
 #
 # https://cloud.google.com/compute/docs/images#os-compute-support
-#
+# Check GCE images at https://cloud-images.ubuntu.com/locator/
 
 variable "oss" {
   description = "Map of supported Linux distributions"
@@ -13,7 +13,8 @@ variable "oss" {
     "ubuntu:16"     = "ubuntu-os-cloud/ubuntu-1604-xenial-v20210429"
     "ubuntu:18"     = "ubuntu-os-cloud/ubuntu-1804-bionic-v20210825"
     "ubuntu:20"     = "ubuntu-os-cloud/ubuntu-2004-focal-v20210825"
-    "ubuntu:latest" = "ubuntu-os-cloud/ubuntu-2004-focal-v20210825"
+    "ubuntu:22"     = "ubuntu-os-cloud/ubuntu-2204-jammy-v20240904"
+    "ubuntu:latest" = "ubuntu-os-cloud/ubuntu-2204-jammy-v20240904"
 
     "redhat:7.8"    = "rhel-cloud/rhel-7-v20200910"
     "redhat:7.9"    = "rhel-cloud/rhel-7-v20210817"

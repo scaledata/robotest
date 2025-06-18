@@ -11,7 +11,7 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-FROM quay.io/gravitational/debian-grande:buster
+FROM quay.io/gravitational/debian-grande:bullseye
 
 RUN apt-get update && \
     apt-get install -y curl unzip gnupg2 dirmngr
@@ -63,9 +63,6 @@ WORKDIR /robotest
 COPY build/robotest-suite /usr/bin/robotest-suite
 COPY terraform /robotest/terraform
 COPY run_suite.sh /usr/bin/run_suite.sh
-COPY polaris.pub /robotest/polaris.pub
-COPY polaris.pem /robotest/polaris.pem
-RUN chmod 0660 /robotest/polaris.pem
 #TODO: Change the user on the template and the SSH keys. polaris is not meant for this
 
 RUN chmod +x /usr/bin/robotest-suite

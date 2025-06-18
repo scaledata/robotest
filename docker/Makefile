@@ -11,7 +11,7 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-TARGETS := e2e suite
+TARGETS := suite
 DOCKER_REPO := quay.io/gravitational
 # An empty version will result in build failure, call targets from the top level Makefile to set this
 ROBOTEST_DOCKER_VERSION ?=
