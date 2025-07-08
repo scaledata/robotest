@@ -417,6 +417,21 @@ func configToTerraformVars(cfg Config) (tfvars map[string]interface{}, err error
 		if cfg.GCE.Zone != "" {
 			tfvars["zone"] = cfg.GCE.Zone
 		}
+	case constants.Vsphere:
+		tfvars["vsphere_user"] = cfg.Vsphere.VsphereUser
+		tfvars["vsphere_password"] = cfg.Vsphere.VspherePassword
+		tfvars["vsphere_server"] = cfg.Vsphere.VsphereServer
+		tfvars["datacenter"] = cfg.Vsphere.Datacenter
+		tfvars["cluster"] = cfg.Vsphere.Cluster
+		tfvars["datastore"] = cfg.Vsphere.Datastore
+		tfvars["vm_folder"] = cfg.Vsphere.VmFolder
+		tfvars["network"] = cfg.Vsphere.Network
+		tfvars["template"] = cfg.Vsphere.Template
+		tfvars["node_tag"] = cfg.Vsphere.NodeTag
+		tfvars["vm_type"] = cfg.Vsphere.VmType
+		tfvars["os_user"] = cfg.Vsphere.SSHUser
+		tfvars["ssh_key_path"] = cfg.Vsphere.SSHKeyPath
+		tfvars["ssh_pub_key_path"] = cfg.Vsphere.SSHPublicKeyPath
 	default:
 		return nil, trace.BadParameter("invalid cloud provider: %v", cfg.CloudProvider)
 	}

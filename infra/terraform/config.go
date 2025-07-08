@@ -21,6 +21,7 @@ import (
 	"github.com/gravitational/robotest/infra/providers/aws"
 	"github.com/gravitational/robotest/infra/providers/azure"
 	"github.com/gravitational/robotest/infra/providers/gce"
+	"github.com/gravitational/robotest/infra/providers/vsphere"
 	"github.com/gravitational/robotest/lib/constants"
 
 	"github.com/gravitational/trace"
@@ -73,6 +74,8 @@ func (c Config) SSHConfig() (user, keypath string) {
 		return c.Azure.SSHUser, c.Azure.SSHKeyPath
 	case constants.GCE:
 		return c.GCE.SSHUser, c.GCE.SSHKeyPath
+	case constants.Vsphere:
+		return c.Vsphere.SSHUser, c.Vsphere.SSHKeyPath
 	default:
 		return "", ""
 	}
@@ -90,6 +93,8 @@ type Config struct {
 	Azure *azure.Config
 	// GCE defines Google Compute Engine connection parameters
 	GCE *gce.Config
+	// Vsphere defines Vcenter connection parameters
+	Vsphere *vsphere.Config
 	// OS specified the OS distribution
 	OS string `json:"os" yaml:"os" validate:"required,eq=ubuntu|eq=redhat|eq=centos|eq=debian|eq=sles|eq=suse"`
 	// ScriptPath is the path to the terraform script or directory for provisioning

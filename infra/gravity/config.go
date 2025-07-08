@@ -30,12 +30,13 @@ import (
 	"github.com/gravitational/robotest/infra/providers/azure"
 	"github.com/gravitational/robotest/infra/providers/gce"
 	"github.com/gravitational/robotest/infra/providers/ops"
+	"github.com/gravitational/robotest/infra/providers/vsphere"
 	"github.com/gravitational/robotest/lib/constants"
 
 	"github.com/gravitational/trace"
 	"github.com/stretchr/testify/require"
-	"gopkg.in/go-playground/validator.v9"
-	"gopkg.in/yaml.v2"
+	validator "gopkg.in/go-playground/validator.v9"
+	yaml "gopkg.in/yaml.v2"
 )
 
 // OS represents OS vendor/version
@@ -46,11 +47,14 @@ type OS struct {
 // UnmarshalText interprets b as an OS vendor with a version.
 // I.e. given:
 //
-//   "vendor:version", it populates this OS instance accordingly
+//	"vendor:version", it populates this OS instance accordingly
 func (os *OS) UnmarshalText(b []byte) error {
 	split := bytes.Split(b, []byte(":"))
 	if len(split) != 2 {
-		return trace.BadParameter("OS should be in format vendor:version, got %q", b)
+		return trace.BadParameter(
+			"OS should be in format vendor:version, got %q",
+			b,
+		)
 	}
 	os.Vendor = string(split[0])
 	os.Version = string(split[1])
@@ -85,7 +89,7 @@ func (drv StorageDriver) Driver() string {
 // CloudProvider, AWS, Azure, ScriptPath and InstallerURL
 type ProvisionerConfig struct {
 	// DeployTo defines cloud to deploy to
-	CloudProvider string `yaml:"cloud" validate:"required,eq=aws|eq=azure|eq=gce|eq=ops"`
+	CloudProvider string `yaml:"cloud" validate:"required,eq=aws|eq=azure|eq=gce|eq=ops|eq=vsphere"`
 	// AWS defines AWS connection parameters
 	AWS *aws.Config `yaml:"aws"`
 	// Azure defines Azure connection parameters
@@ -94,6 +98,8 @@ type ProvisionerConfig struct {
 	GCE *gce.Config `yaml:"gce"`
 	// Ops defines Ops Center connection parameters
 	Ops *ops.Config `yaml:"ops"`
+	// Vsphere defines Vcenter connection parameters
+	Vsphere *vsphere.Config `yaml:"vsphere"`
 
 	// ScriptPath is the path to the terraform script or directory for provisioning
 	ScriptPath string `yaml:"script_path" validate:"required"`
@@ -125,6 +131,7 @@ type ProvisionerConfig struct {
 
 // LoadConfig loads essential parameters from YAML
 func LoadConfig(t *testing.T, configBytes []byte) (cfg ProvisionerConfig) {
+	fmt.Println(string(configBytes))
 	err := yaml.Unmarshal(configBytes, &cfg)
 	require.NoError(t, err, string(configBytes))
 
@@ -139,6 +146,8 @@ func LoadConfig(t *testing.T, configBytes []byte) (cfg ProvisionerConfig) {
 	case constants.GCE:
 		require.NotNil(t, cfg.GCE)
 		cfg.cloudRegions = newCloudRegions(strings.Split(cfg.GCE.Region, ","))
+	case constants.Vsphere:
+		require.NotNil(t, cfg.Vsphere)
 	case constants.Ops:
 		require.NotNil(t, cfg.Ops)
 		// set AWS environment variables to be used by subsequent commands
@@ -191,7 +200,10 @@ func (config ProvisionerConfig) WithOS(os OS) ProvisionerConfig {
 	cfg := config
 	cfg.os = os
 	cfg.tag = fmt.Sprintf("%s-%s%s", cfg.tag, os.Vendor, os.Version)
-	cfg.StateDir = filepath.Join(cfg.StateDir, fmt.Sprintf("%s%s", os.Vendor, os.Version))
+	cfg.StateDir = filepath.Join(
+		cfg.StateDir,
+		fmt.Sprintf("%s%s", os.Vendor, os.Version),
+	)
 
 	return cfg
 }
@@ -214,7 +226,7 @@ func (config ProvisionerConfig) WithStorageDriver(storageDriver StorageDriver) P
 // validateConfig checks that key parameters are present
 func validateConfig(config ProvisionerConfig) error {
 	switch config.CloudProvider {
-	case constants.AWS, constants.Azure, constants.GCE, constants.Ops:
+	case constants.AWS, constants.Azure, constants.GCE, constants.Ops, constants.Vsphere:
 	default:
 		return trace.BadParameter("unknown cloud provider %s", config.CloudProvider)
 	}
@@ -227,9 +239,13 @@ func validateConfig(config ProvisionerConfig) error {
 	var errs []error
 	if validationErrors, ok := err.(validator.ValidationErrors); ok {
 		for _, fieldError := range validationErrors {
-			errs = append(errs,
-				trace.BadParameter(` * %s="%v" fails "%s"`,
-					fieldError.Field(), fieldError.Value(), fieldError.Tag()))
+			errs = append(
+				errs,
+				trace.BadParameter(
+					` * %s="%v" fails "%s"`,
+					fieldError.Field(), fieldError.Value(), fieldError.Tag(),
+				),
+			)
 		}
 	}
 	return trace.NewAggregate(errs...)

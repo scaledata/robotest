@@ -75,7 +75,11 @@ type Gravity interface {
 	// Reboot will reboot this node and wait until it will become available again
 	Reboot(ctx context.Context, graceful Graceful) error
 	// CollectLogs will pull essential logs from node and store it in state dir under node-logs/prefix
-	CollectLogs(ctx context.Context, prefix string, args ...string) (localPath string, err error)
+	CollectLogs(
+		ctx context.Context,
+		prefix string,
+		args ...string,
+	) (localPath string, err error)
 	// Upload uploads packages in current installer dir to cluster
 	Upload(ctx context.Context) error
 	// Upgrade takes currently active installer (see SetInstaller) and tries to perform upgrade
@@ -151,29 +155,37 @@ type gravity struct {
 }
 
 func (g *gravity) MarshalJSON() ([]byte, error) {
-	return json.Marshal(map[string]string{
-		"public_ip": g.node.Addr(),
-		"ip":        g.node.PrivateAddr(),
-	})
+	return json.Marshal(
+		map[string]string{
+			"public_ip": g.node.Addr(),
+			"ip":        g.node.PrivateAddr(),
+		},
+	)
 }
 
 // waits for SSH to be up on node and returns client
-func sshClient(ctx context.Context, node infra.Node, log logrus.FieldLogger) (*ssh.Client, error) {
+func sshClient(
+	ctx context.Context,
+	node infra.Node,
+	log logrus.FieldLogger,
+) (*ssh.Client, error) {
 	ctx, cancel := context.WithTimeout(ctx, deadlineSSH)
 	defer cancel()
 
 	var client *ssh.Client
 	b := backoff.NewConstantBackOff(retrySSH)
-	err := wait.RetryWithInterval(ctx, b, func() (err error) {
-		client, err = node.Client()
-		if err == nil {
-			log.Debug("Connected via SSH.")
-			return nil
-		}
+	err := wait.RetryWithInterval(
+		ctx, b, func() (err error) {
+			client, err = node.Client()
+			if err == nil {
+				log.Debug("Connected via SSH.")
+				return nil
+			}
 
-		log.WithError(err).Debug("Waiting for SSH.")
-		return trace.Wrap(err)
-	}, log)
+			log.WithError(err).Debug("Waiting for SSH.")
+			return trace.Wrap(err)
+		}, log,
+	)
 	if err != nil {
 		return nil, trace.Wrap(err)
 	}
@@ -186,8 +198,10 @@ func (g *gravity) Logger() logrus.FieldLogger {
 
 // String returns public and private addresses of the node
 func (g *gravity) String() string {
-	return fmt.Sprintf("node(private_addr=%s, public_addr=%s)",
-		g.node.PrivateAddr(), g.node.Addr())
+	return fmt.Sprintf(
+		"node(private_addr=%s, public_addr=%s)",
+		g.node.PrivateAddr(), g.node.Addr(),
+	)
 }
 
 func (g *gravity) Node() infra.Node {
@@ -228,55 +242,104 @@ func (g *gravity) Install(ctx context.Context, param InstallParam) error {
 	}
 
 	var buf bytes.Buffer
-	err := installCmdTemplate.Execute(&buf, config)
+	err := g.CreateClusterConfig(ctx)
+	if err != nil {
+		return trace.Wrap(err)
+	}
+
+	err = installCmdTemplate.Execute(&buf, config)
 	if err != nil {
 		return trace.Wrap(err, buf.String())
 	}
 
-	err = sshutils.Run(ctx, g.Client(), g.Logger(), buf.String(),
+	err = sshutils.Run(
+		ctx, g.Client(), g.Logger(), buf.String(),
 		// Add SELinux-specific triggers. These will only have effect on SELinux-enabled hosts
 		map[string]string{
 			constants.GravitySELinuxEnv: "true",
-		})
+		},
+	)
 	return trace.Wrap(err, param)
 }
 
+func (g *gravity) CreateClusterConfig(ctx context.Context) error {
+	content := `
+kind: ClusterConfiguration
+version: v1
+spec:
+  kubelet:
+    config:
+      kind: KubeletConfiguration
+      apiVersion: kubelet.config.k8s.io/v1beta1
+      cgroupDriver: systemd`
+
+	cmd := fmt.Sprintf(
+		"cat > /tmp/cluster_config.yaml << 'EOF'\n%s\nEOF",
+		content,
+	)
+	err := sshutils.Run(ctx, g.Client(), g.Logger(), cmd, nil)
+	log := g.Logger().WithFields(logrus.Fields{"url": "config", "dir": "config"})
+	if err != nil {
+		log.Infof("Creating cluster config file failed with errr: %v", err)
+	}
+	return trace.Wrap(err, "failed to create cluster config file")
+}
+
 var installCmdTemplate = template.Must(
-	template.New("gravity_install").Parse(`
+	template.New("gravity_install").Parse(
+		`
 		cd {{.InstallDir}} && ./gravity version && sudo ./gravity install --debug \
 		--advertise-addr={{.PrivateAddr}} --token={{.Token}} --flavor={{.Flavor}} \
 		{{if .DockerDevice}}--docker-device={{.DockerDevice}}{{end}} \
 		{{if .StorageDriver}}--storage-driver={{.StorageDriver}}{{end}} \
+		--config=/tmp/cluster_config.yaml \
 		--system-log-file={{ .AgentLogPath }} \
 		--cloud-provider=generic --state-dir={{.StateDir}} \
 		--httpprofile=localhost:6061 \
 		{{if .Cluster}}--cluster={{.Cluster}}{{end}} \
-		{{if .OpsAdvertiseAddr}}--ops-advertise-addr={{.OpsAdvertiseAddr}}{{end}}\
 		{{if .ServiceUID}}--service-uid={{.ServiceUID}}{{end}}\
 		{{if .ServiceGID}}--service-gid={{.ServiceGID}}{{end}}\
-`))
+`,
+	),
+)
+
+// Removed the above: {{if .OpsAdvertiseAddr}}--ops-advertise-addr={{.OpsAdvertiseAddr}}{{end}}\
 
 // Status queries cluster status
 func (g *gravity) Status(ctx context.Context) (*GravityStatus, error) {
-	cmd := fmt.Sprintf("sudo gravity status --output=json --system-log-file=%v",
-		defaults.AgentLogPath)
+	cmd := fmt.Sprintf(
+		"sudo gravity status --output=json --system-log-file=%v",
+		defaults.AgentLogPath,
+	)
 	status := GravityStatus{}
-	err := sshutils.RunAndParse(ctx, g.Client(), g.Logger(), cmd, nil, parseStatus(&status))
+	err := sshutils.RunAndParse(
+		ctx,
+		g.Client(),
+		g.Logger(),
+		cmd,
+		nil,
+		parseStatus(&status),
+	)
 	if err != nil {
 		if exitErr, ok := trace.Unwrap(err).(sshutils.ExitStatusError); ok {
-			g.Logger().WithFields(logrus.Fields{
-				"private_addr": g.Node().PrivateAddr(),
-				"addr":         g.Node().Addr(),
-				"command":      cmd,
-				"exit code":    exitErr.ExitStatus(),
-			}).Warn("Failed.")
+			g.Logger().WithFields(
+				logrus.Fields{
+					"private_addr": g.Node().PrivateAddr(),
+					"addr":         g.Node().Addr(),
+					"command":      cmd,
+					"exit code":    exitErr.ExitStatus(),
+				},
+			).Warn("Failed.")
 		}
 		return nil, trace.Wrap(err, cmd)
 	}
 	return &status, nil
 }
 
-func (g *gravity) OfflineUpdate(ctx context.Context, installerUrl string) error {
+func (g *gravity) OfflineUpdate(
+	ctx context.Context,
+	installerUrl string,
+) error {
 	return nil
 }
 
@@ -298,32 +361,39 @@ func (g *gravity) Join(ctx context.Context, param JoinCmd) error {
 	}
 
 	var buf bytes.Buffer
-	err := joinCmdTemplate.Execute(&buf, cmd{
-		InstallDir:   g.installDir,
-		PrivateAddr:  g.Node().PrivateAddr(),
-		DockerDevice: dockerDevice,
-		AgentLogPath: defaults.AgentLogPath,
-		JoinCmd:      param,
-	})
+	err := joinCmdTemplate.Execute(
+		&buf, cmd{
+			InstallDir:   g.installDir,
+			PrivateAddr:  g.Node().PrivateAddr(),
+			DockerDevice: dockerDevice,
+			AgentLogPath: defaults.AgentLogPath,
+			JoinCmd:      param,
+		},
+	)
 	if err != nil {
 		return trace.Wrap(err, buf.String())
 	}
 
-	err = sshutils.Run(ctx, g.Client(), g.Logger(), buf.String(),
+	err = sshutils.Run(
+		ctx, g.Client(), g.Logger(), buf.String(),
 		// Add SELinux-specific triggers. These will only have effect on SELinux-enabled hosts
 		map[string]string{
 			constants.GravitySELinuxEnv: "true",
-		})
+		},
+	)
 	return trace.Wrap(err, param)
 }
 
 var joinCmdTemplate = template.Must(
-	template.New("gravity_join").Parse(`
+	template.New("gravity_join").Parse(
+		`
 		cd {{.InstallDir}} && sudo ./gravity join {{.PeerAddr}} \
 		--advertise-addr={{.PrivateAddr}} --token={{.Token}} --debug \
 		--role={{.Role}} --docker-device={{.DockerDevice}} \
 		--system-log-file={{.AgentLogPath}} --state-dir={{.StateDir}} \
-		--httpprofile=localhost:6061`))
+		--httpprofile=localhost:6061`,
+	),
+)
 
 // Leave makes given node leave the cluster
 func (g *gravity) Leave(ctx context.Context, graceful Graceful) error {
@@ -338,7 +408,11 @@ func (g *gravity) Leave(ctx context.Context, graceful Graceful) error {
 }
 
 // Remove ejects node from cluster
-func (g *gravity) Remove(ctx context.Context, node string, graceful Graceful) error {
+func (g *gravity) Remove(
+	ctx context.Context,
+	node string,
+	graceful Graceful,
+) error {
 	var cmd string
 	if graceful {
 		cmd = fmt.Sprintf(`remove --confirm %s`, node)
@@ -350,8 +424,10 @@ func (g *gravity) Remove(ctx context.Context, node string, graceful Graceful) er
 
 // Uninstall removes gravity installation. It requires Leave beforehand
 func (g *gravity) Uninstall(ctx context.Context) error {
-	cmd := fmt.Sprintf(`cd %s && sudo ./gravity system uninstall --confirm --system-log-file=%v`,
-		g.installDir, defaults.AgentLogPath)
+	cmd := fmt.Sprintf(
+		`cd %s && sudo ./gravity system uninstall --confirm --system-log-file=%v`,
+		g.installDir, defaults.AgentLogPath,
+	)
 	err := sshutils.Run(ctx, g.Client(), g.Logger(), cmd, nil)
 	return trace.Wrap(err, cmd)
 }
@@ -360,8 +436,10 @@ func (g *gravity) Uninstall(ctx context.Context) error {
 // This is usually required to properly clean up cloud resources
 // internally managed by kubernetes in case of kubernetes cloud integration
 func (g *gravity) UninstallApp(ctx context.Context) error {
-	cmd := fmt.Sprintf("cd %s && sudo ./gravity app uninstall $(./gravity app-package) --system-log-file=%v",
-		g.installDir, defaults.AgentLogPath)
+	cmd := fmt.Sprintf(
+		"cd %s && sudo ./gravity app uninstall $(./gravity app-package) --system-log-file=%v",
+		g.installDir, defaults.AgentLogPath,
+	)
 	err := sshutils.Run(ctx, g.Client(), g.Logger(), cmd, nil)
 	return trace.Wrap(err, cmd)
 }
@@ -416,34 +494,73 @@ func (g *gravity) Reboot(ctx context.Context, graceful Graceful) error {
 // prefix names the state sub-directory to store logs into. args specifies optional additional
 // arguments to the report command.
 // Returns the local path where the report files will be stored
-func (g *gravity) CollectLogs(ctx context.Context, prefix string, args ...string) (localPath string, err error) {
+func (g *gravity) CollectLogs(
+	ctx context.Context,
+	prefix string,
+	args ...string,
+) (localPath string, err error) {
 	if g.ssh == nil {
-		return "", trace.AccessDenied("cannot collect logs from an offline node %v", g)
+		return "", trace.AccessDenied(
+			"cannot collect logs from an offline node %v",
+			g,
+		)
 	}
 
-	localPath = filepath.Join(g.param.StateDir, "node-logs", prefix,
-		fmt.Sprintf("%v-logs.tgz", g.Node().PrivateAddr()))
-	return localPath, trace.Wrap(sshutils.PipeCommand(ctx, g.Client(), g.Logger(),
-		fmt.Sprintf("cd %v && sudo ./gravity system report %v", g.installDir,
-			strings.Join(args, " ")), localPath))
+	localPath = filepath.Join(
+		g.param.StateDir, "node-logs", prefix,
+		fmt.Sprintf("%v-logs.tgz", g.Node().PrivateAddr()),
+	)
+	return localPath, trace.Wrap(
+		sshutils.PipeCommand(
+			ctx, g.Client(), g.Logger(),
+			fmt.Sprintf(
+				"cd %v && sudo ./gravity system report %v", g.installDir,
+				strings.Join(args, " "),
+			), localPath,
+		),
+	)
 }
 
 // SetInstaller transfers and prepares installer package given with installerUrl.
 // The install directory will be overridden to the specified sub-directory
 // in user's home
-func (g *gravity) SetInstaller(ctx context.Context, installerURL string, subdir string) error {
+func (g *gravity) SetInstaller(
+	ctx context.Context,
+	installerURL string,
+	subdir string,
+) error {
 	installDir := filepath.Join(g.param.homeDir, subdir)
-	log := g.Logger().WithFields(logrus.Fields{"installer_url": installerURL, "installer_dir": installDir})
+	log := g.Logger().WithFields(
+		logrus.Fields{
+			"installer_url": installerURL,
+			"installer_dir": installDir,
+		},
+	)
 
-	log.Infof("Transfer installer %v -> %v.", installerURL, installDir)
-
-	tgz, err := sshutils.TransferFile(ctx, g.Client(), log, installerURL, installDir, g.param.env)
+	tgz, err := sshutils.TransferFile(
+		ctx,
+		g.Client(),
+		log,
+		installerURL,
+		installDir,
+		g.param.env,
+	)
 	if err != nil {
-		log.WithError(err).Warnf("Failed to transfer installer %v -> %v.", installerURL, installDir)
+		log.WithError(err).Warnf(
+			"Failed to transfer installer %v -> %v.",
+			installerURL,
+			installDir,
+		)
 		return trace.Wrap(err)
 	}
 
-	err = sshutils.Run(ctx, g.Client(), log, fmt.Sprintf("tar -xvf %s -C %s", tgz, installDir), nil)
+	err = sshutils.Run(
+		ctx,
+		g.Client(),
+		log,
+		fmt.Sprintf("tar -xvf %s -C %s", tgz, installDir),
+		nil,
+	)
 	if err != nil {
 		return trace.Wrap(err)
 	}
@@ -473,39 +590,62 @@ func (g *gravity) TransferFile(ctx context.Context, url, subdir string) error {
 }
 
 // ExecScript will transfer and execute script provided with given args
-func (g *gravity) ExecScript(ctx context.Context, scriptUrl string, args []string) error {
-	log := g.Logger().WithFields(logrus.Fields{
-		"script": scriptUrl, "args": args})
+func (g *gravity) ExecScript(
+	ctx context.Context,
+	scriptUrl string,
+	args []string,
+) error {
+	log := g.Logger().WithFields(
+		logrus.Fields{
+			"script": scriptUrl, "args": args,
+		},
+	)
 
 	log.Debug("Execute.")
 
-	spath, err := sshutils.TransferFile(ctx, g.Client(), log,
-		scriptUrl, defaults.TmpDir, g.param.env)
+	spath, err := sshutils.TransferFile(
+		ctx, g.Client(), log,
+		scriptUrl, defaults.TmpDir, g.param.env,
+	)
 	if err != nil {
 		log.WithError(err).Error("failed to transfer script")
 		return trace.Wrap(err)
 	}
 
-	err = sshutils.Run(ctx, g.Client(), log,
-		fmt.Sprintf("sudo /bin/bash -x %s %s", spath, strings.Join(args, " ")), nil)
+	err = sshutils.Run(
+		ctx, g.Client(), log,
+		fmt.Sprintf("sudo /bin/bash -x %s %s", spath, strings.Join(args, " ")), nil,
+	)
 	return trace.Wrap(err)
 }
 
 // Upload uploads packages in current installer dir to cluster
 func (g *gravity) Upload(ctx context.Context) error {
-	err := sshutils.Run(ctx, g.Client(), g.Logger(), fmt.Sprintf(`cd %s && sudo ./upload`, g.installDir), nil)
+	err := sshutils.Run(
+		ctx,
+		g.Client(),
+		g.Logger(),
+		fmt.Sprintf(`cd %s && sudo ./upload`, g.installDir),
+		nil,
+	)
 	return trace.Wrap(err)
 }
 
 // Upgrade takes current installer and tries to perform upgrade
 func (g *gravity) Upgrade(ctx context.Context) error {
 	executablePath := filepath.Join(g.installDir, "gravity")
-	return trace.Wrap(g.runOp(ctx,
-		fmt.Sprintf("upgrade $(%v app-package --state-dir=%v) --etcd-retry-timeout=%v",
-			executablePath,
-			g.installDir,
-			defaults.EtcdRetryTimeout),
-		nil))
+	return trace.Wrap(
+		g.runOp(
+			ctx,
+			fmt.Sprintf(
+				"upgrade $(%v app-package --state-dir=%v) --etcd-retry-timeout=%v",
+				executablePath,
+				g.installDir,
+				defaults.EtcdRetryTimeout,
+			),
+			nil,
+		),
+	)
 }
 
 // for cases when gravity doesn't return just opcode but an extended message
@@ -517,13 +657,24 @@ const (
 )
 
 // runOp launches specific command and waits for operation to complete, ignoring transient errors
-func (g *gravity) runOp(ctx context.Context, command string, env map[string]string) error {
+func (g *gravity) runOp(
+	ctx context.Context,
+	command string,
+	env map[string]string,
+) error {
 	var code string
 	sudoGravity := fmt.Sprintf(`cd %v && sudo -E ./gravity`, g.installDir)
 	logPath := filepath.Join(g.installDir, defaults.AgentLogPath)
-	err := sshutils.RunAndParse(ctx, g.Client(), g.Logger(),
-		fmt.Sprintf(`%v %v --insecure --quiet --system-log-file=%v`, sudoGravity, command, logPath),
-		env, sshutils.ParseAsString(&code))
+	err := sshutils.RunAndParse(
+		ctx, g.Client(), g.Logger(),
+		fmt.Sprintf(
+			`%v %v --insecure --quiet --system-log-file=%v`,
+			sudoGravity,
+			command,
+			logPath,
+		),
+		env, sshutils.ParseAsString(&code),
+	)
 	if err != nil {
 		return trace.Wrap(err)
 	}
@@ -537,33 +688,66 @@ func (g *gravity) runOp(ctx context.Context, command string, env map[string]stri
 		FieldLogger: g.Logger().WithField("retry-operation", code),
 	}
 
-	err = retry.Do(ctx, func() error {
-		var response string
-		cmd := fmt.Sprintf(`%v status --quiet --operation-id=%s`, sudoGravity, code)
-		err := sshutils.RunAndParse(ctx, g.Client(), g.Logger(), cmd, nil, sshutils.ParseAsString(&response))
-		if err != nil {
-			return wait.Continue(cmd)
-		}
+	err = retry.Do(
+		ctx, func() error {
+			var response string
+			cmd := fmt.Sprintf(
+				`%v status --quiet --operation-id=%s`,
+				sudoGravity,
+				code,
+			)
+			err := sshutils.RunAndParse(
+				ctx,
+				g.Client(),
+				g.Logger(),
+				cmd,
+				nil,
+				sshutils.ParseAsString(&response),
+			)
+			if err != nil {
+				return wait.Continue(cmd)
+			}
 
-		switch strings.TrimSpace(response) {
-		case opStatusCompleted:
-			return nil
-		case opStatusFailed:
-			return wait.Abort(trace.Errorf("%s: response=%s, err=%v", cmd, response, err))
-		default:
-			return wait.Continue("non-final / unknown op status: %q", response)
-		}
-	})
+			switch strings.TrimSpace(response) {
+			case opStatusCompleted:
+				return nil
+			case opStatusFailed:
+				return wait.Abort(
+					trace.Errorf(
+						"%s: response=%s, err=%v",
+						cmd,
+						response,
+						err,
+					),
+				)
+			default:
+				return wait.Continue("non-final / unknown op status: %q", response)
+			}
+		},
+	)
 	return trace.Wrap(err)
 }
 
 // RunInPlanet executes given command inside Planet container
-func (g *gravity) RunInPlanet(ctx context.Context, cmd string, args ...string) (string, error) {
-	c := fmt.Sprintf(`cd %s && sudo ./gravity enter -- --notty %s -- %s`,
-		g.installDir, cmd, strings.Join(args, " "))
+func (g *gravity) RunInPlanet(
+	ctx context.Context,
+	cmd string,
+	args ...string,
+) (string, error) {
+	c := fmt.Sprintf(
+		`cd %s && sudo ./gravity enter -- --notty %s -- %s`,
+		g.installDir, cmd, strings.Join(args, " "),
+	)
 
 	var out string
-	err := sshutils.RunAndParse(ctx, g.Client(), g.Logger(), c, nil, sshutils.ParseAsString(&out))
+	err := sshutils.RunAndParse(
+		ctx,
+		g.Client(),
+		g.Logger(),
+		c,
+		nil,
+		sshutils.ParseAsString(&out),
+	)
 	if err != nil {
 		return "", trace.Wrap(err)
 	}

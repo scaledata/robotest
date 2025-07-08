@@ -11,7 +11,7 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-TARGETS := e2e suite
+TARGETS := suite
 ifeq ($(origin VERSION), undefined)
 # avoid lazily evaluating version.sh (and thus rerunning the shell command several times)
 VERSION := $(shell ./version.sh)
@@ -24,7 +24,7 @@ BUILDDIR ?= $(abspath build)
 # docker doesn't allow "+" in image tags: https://github.com/docker/distribution/issues/1201
 export ROBOTEST_DOCKER_VERSION ?= $(subst +,-,$(VERSION))
 export ROBOTEST_DOCKER_TAG ?=
-export ROBOTEST_DOCKER_ARGS ?= --pull
+export ROBOTEST_DOCKER_ARGS ?=
 DOCKERFLAGS := --rm=true $(NOROOT) -v $(PWD):$(SRCDIR) -v $(BUILDDIR):$(SRCDIR)/build -w $(SRCDIR)
 BUILDBOX := robotest:buildbox
 BUILDBOX_IIDFILE := $(BUILDDIR)/.robotest-buildbox.iid

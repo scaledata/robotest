@@ -11,13 +11,13 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-TARGETS := e2e suite
+TARGETS := suite
 DOCKER_REPO := quay.io/gravitational
 # An empty version will result in build failure, call targets from the top level Makefile to set this
 ROBOTEST_DOCKER_VERSION ?=
 # An empty tag will be ignored
 ROBOTEST_DOCKER_TAG ?=
-ROBOTEST_DOCKER_ARGS ?= --pull
+ROBOTEST_DOCKER_ARGS ?=
 
 GRAVITY_VERSION := 5.5.50
 TERRAFORM_VERSION := 0.12.9
@@ -27,9 +27,10 @@ TERRAFORM_PROVIDER_AZURERM_VERSION := 1.5.0
 TERRAFORM_PROVIDER_GOOGLE_VERSION := 2.15.0
 TERRAFORM_PROVIDER_RANDOM_VERSION := 2.2.0
 TERRAFORM_PROVIDER_TEMPLATE_VERSION := 2.1.2
+TERRAFORM_PROVIDER_VSPHERE_VERSION := 1.14.0
 export
 
-providers := AZURERM AWS GOOGLE RANDOM TEMPLATE
+providers := AZURERM AWS GOOGLE RANDOM TEMPLATE VSPHERE
 provider_args := $(foreach provider,$(providers),--build-arg TERRAFORM_PROVIDER_$(provider)_VERSION=$$TERRAFORM_PROVIDER_$(provider)_VERSION)
 
 BUILD_ARGS := \

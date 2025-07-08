@@ -69,4 +69,6 @@ const (
 	GCE = "gce"
 	// Ops specifies a special cloud provider - a telekube Ops Center
 	Ops = "ops"
+	// Vsphere specifies local Vsphere cluster
+	Vsphere = "vsphere"
 )
