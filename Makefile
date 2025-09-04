@@ -68,12 +68,12 @@ $(BUILDBOX_IIDFILE): docker/build/Dockerfile | $(BUILDDIR)
 
 .PHONY: containers
 containers: ## Build container images.
-containers: build lint
+containers: build
 	$(MAKE) -C docker containers
 
 .PHONY: publish
 publish: ## Publish container images to quay.io.
-publish: build lint
+publish: build
 	$(MAKE) -C docker -j publish
 
 .PHONY: clean

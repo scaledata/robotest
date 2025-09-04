@@ -14,7 +14,8 @@ variable "oss" {
     "ubuntu:18"     = "ubuntu-os-cloud/ubuntu-1804-bionic-v20210825"
     "ubuntu:20"     = "ubuntu-os-cloud/ubuntu-2004-focal-v20210825"
     "ubuntu:22"     = "ubuntu-os-cloud/ubuntu-2204-jammy-v20240904"
-    "ubuntu:latest" = "ubuntu-os-cloud/ubuntu-2204-jammy-v20240904"
+    "ubuntu:24"     = "ubuntu-os-cloud/ubuntu-2404-noble-arm64-v20250130"
+    "ubuntu:latest" = "ubuntu-os-cloud/ubuntu-2404-noble-arm64-v20250130"
 
     "redhat:7.8"    = "rhel-cloud/rhel-7-v20200910"
     "redhat:7.9"    = "rhel-cloud/rhel-7-v20210817"
